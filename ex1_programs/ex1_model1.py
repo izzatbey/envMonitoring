@@ -26,6 +26,9 @@ from keras.optimizers import Adam
 import numpy as np
 import cv2
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
 
 IMAGE_SIZE = 256
 
@@ -176,12 +179,12 @@ history=model.fit(
 
 model.summary()
 
-model_dir = "/home/izzatbey/Documents/KAIT/envMonitoring/model"
+model_dir = os.getenv("MODEL_OUTPUT_DIRECTORY")
 model_path = os.path.join(model_dir, "ex1_model1{}.keras".format(Z_DIM))
 os.makedirs(model_dir, exist_ok=True)
 model.save(model_path)
 
-model_path_load = "/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras"
+model_path_load = f"{model_dir}/ex1_model11000.keras"
 model = load_model(model_path_load, custom_objects={"r_loss": r_loss})
 
 encoder_output_layer = model.get_layer('encoder_output').output
@@ -192,10 +195,10 @@ feature_vectors = encoder.predict(x_train)
 print("Feature Vectors:", feature_vectors)
 print("Feature Vectors Shape:", feature_vectors.shape)
 saved_vectors = np.array(feature_vectors)
-np.savetxt("/home/izzatbey/Documents/KAIT/envMonitoring/feature_vectors.csv", saved_vectors, delimiter=',')
+np.savetxt(f"{model_dir}/feature_vectors.csv", saved_vectors, delimiter=',')
 print("Feature vectors Saved!")
-if os.path.exists("/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras"):
-   os.remove("/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras")
+if os.path.exists(f"{model_dir}/ex1_model11000.keras"):
+   os.remove(f"{model_dir}/ex1_model11000.keras")
    print(".keras file successfully deleted.")
 else:
    print(".keras file does not exist. File deletion skipped")

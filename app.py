@@ -7,6 +7,7 @@ import os
 import threading
 import time
 import sys
+import requests
 sys.path.append('./img_capture')
 from img_capture import capture
 
@@ -60,6 +61,35 @@ def get_images():
     images = Image.query.all()
     return jsonify([{"id": img.id, "filename": img.filename, "path": img.path} for img in images]), 200
 
+def process_feature_vectors():
+    model_dir = os.getenv("MODEL_OUTPUT_DIRECTORY")
+    feature_vectors_file = model_dir / 'feature_vectors.csv'
+
+    if feature_vectors_file.exists():
+        # Read contents of the file
+        with open(feature_vectors_file, 'rb') as file:
+            file_data = file.read()
+
+        # Replace with your server endpoint
+        server_url = 'http://127.0.0.1:5001'
+        
+        try:
+            # Send file to server using POST request
+            response = requests.post(server_url, files={'file': file_data})
+            response.raise_for_status()  # Raise an exception for HTTP errors
+            
+            # If upload successful, delete the file
+            os.remove(feature_vectors_file)
+            print(f"Uploaded and deleted {feature_vectors_file}")
+        
+        except requests.exceptions.RequestException as e:
+            print(f"Error uploading file: {e}")
+
+    else:
+        print(f"{feature_vectors_file} does not exist.")
+    
+    time.sleep(5)
+
 if __name__ == '__main__':
     capture_thread = threading.Thread(target=capture.capture_images)
     capture_thread.daemon = True
@@ -72,5 +102,9 @@ if __name__ == '__main__':
     monitor_thread = threading.Thread(target=ex1_model1)
     monitor_thread.daemon = True
     monitor_thread.start()
-
     app.run(debug=True)
+    feature_vectors_thread = threading.Thread(target=process_feature_vectors)
+    feature_vectors_thread.daemon = True
+    feature_vectors_thread.start()
+
+
