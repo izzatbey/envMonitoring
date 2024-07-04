@@ -10,6 +10,9 @@ import sys
 sys.path.append('./img_capture')
 from img_capture import capture
 
+sys.path.append('./ex1_programs')
+from ex1_programs import ex1_model1
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -66,5 +69,8 @@ if __name__ == '__main__':
     monitor_thread.daemon = True
     monitor_thread.start()
 
+    monitor_thread = threading.Thread(target=ex1_model1)
+    monitor_thread.daemon = True
+    monitor_thread.start()
 
     app.run(debug=True)

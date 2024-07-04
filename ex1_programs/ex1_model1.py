@@ -25,6 +25,7 @@ import tensorflow.keras.backend as K
 from keras.optimizers import Adam
 import numpy as np
 import cv2
+import time
 
 IMAGE_SIZE = 256
 
@@ -57,7 +58,7 @@ def depreprocess(array):
 
 #2 各種設定 https://child-programmer.com/ai/cnn-originaldataset-samplecode/#_CNN_8211_ColaboratoryKerasPython
 
-train_data_path = '/home/izzatbey/Documents/KAIT/Public-2021065/data' # ここを変更。Colaboratoryにアップロードしたzipファイルを解凍後の、データセットのフォルダ名を入力
+train_data_path = '/home/izzatbey/Documents/KAIT/envMonitoring/data' # ここを変更。Colaboratoryにアップロードしたzipファイルを解凍後の、データセットのフォルダ名を入力
 
 image_size = IMAGE_SIZE # ここを変更。必要に応じて変更してください。「28」を指定した場合、縦28横28ピクセルの画像に変換します。
 
@@ -105,14 +106,14 @@ y_train = train_labels
 x_test = valid_images
 y_test = valid_labels
 
-n=5
-for i in range(10):
-    ax = plt.subplot(2, n, i + 1)
-    plt.imshow(x_train[[i]].reshape(image_size,image_size,3))
-    ax.get_xaxis().set_visible(False)
-    ax.get_yaxis().set_visible(False)
-    ax.set_title(str(y_train[i]))
-plt.show()
+# n=5
+# for i in range(10):
+#     ax = plt.subplot(2, n, i + 1)
+#     plt.imshow(x_train[[i]].reshape(image_size,image_size,3))
+#     ax.get_xaxis().set_visible(False)
+#     ax.get_yaxis().set_visible(False)
+#     ax.set_title(str(y_train[i]))
+# plt.show()
 
 LEARNING_RATE = 0.0004
 BATCH_SIZE = 64
@@ -175,12 +176,12 @@ history=model.fit(
 
 model.summary()
 
-model_dir = "/home/izzatbey/Documents/KAIT/env_monitoring/model"
+model_dir = "/home/izzatbey/Documents/KAIT/envMonitoring/model"
 model_path = os.path.join(model_dir, "ex1_model1{}.keras".format(Z_DIM))
 os.makedirs(model_dir, exist_ok=True)
 model.save(model_path)
 
-model_path_load = "/home/izzatbey/Documents/KAIT/env_monitoring/model/ex1_model11000.keras"
+model_path_load = "/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras"
 model = load_model(model_path_load, custom_objects={"r_loss": r_loss})
 
 encoder_output_layer = model.get_layer('encoder_output').output
@@ -191,9 +192,13 @@ feature_vectors = encoder.predict(x_train)
 print("Feature Vectors:", feature_vectors)
 print("Feature Vectors Shape:", feature_vectors.shape)
 saved_vectors = np.array(feature_vectors)
-np.savetxt("/home/izzatbey/Documents/KAIT/env_monitoring/feature_vectors.csv", saved_vectors, delimiter=',')
+np.savetxt("/home/izzatbey/Documents/KAIT/envMonitoring/feature_vectors.csv", saved_vectors, delimiter=',')
 print("Feature vectors Saved!")
+if os.path.exists("/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras"):
+   os.remove("/home/izzatbey/Documents/KAIT/envMonitoring/model/ex1_model11000.keras")
+   print(".keras file successfully deleted.")
+else:
+   print(".keras file does not exist. File deletion skipped")
 # loaded_feature_vectors = np.loadtxt("/home/izzatbey/Documents/KAIT/env_monitoring/feature_vectors.csv", delimiter=',')
 # print(f"Loaded feature vectors shape: {loaded_feature_vectors}")
-
-
+time.sleep(5)
