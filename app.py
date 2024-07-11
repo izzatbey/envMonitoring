@@ -14,8 +14,7 @@ sys.path.append('./img_capture')
 from img_capture import capture
 
 sys.path.append('./ex1_programs')
-from ex1_programs.ex1_model1 import run_model  # Ensure you are importing the function
-
+from new_model_izzat import train_and_save_model, load_model_and_predict, send_file_to_server, delete_images, load_images_from_subfolders
 load_dotenv()
 
 app = Flask(__name__)
@@ -97,21 +96,50 @@ def process_feature_vectors():
         
         time.sleep(30)  # Sleep for 30 seconds before next iteration
 
+def model_thread_function(train_data_path, subfolders, model_path, server_url, log_file):
+    # Train and save the model
+    train_and_save_model(train_data_path, subfolders, model_path, log_file)
+
+    # Load images for prediction (this can be modified as per your requirements)
+    images, image_names = load_images_from_subfolders(train_data_path, subfolders, log_file=log_file)
+
+    # Load model and predict
+    features = load_model_and_predict(model_path.replace('.h5', '_encoder.h5'), images)
+
+    # Save features to CSV
+    features_file = "encoded_features.csv"
+    pd.DataFrame(features).to_csv(features_file, index=False)
+
+    # Send features file to server
+    if server_url:
+        status_code = send_file_to_server(features_file, server_url)
+        if status_code == 200:
+            print("Data sent successfully to the server.")
+            delete_images(image_names)
+            os.remove(features_file)
+        else:
+            print(f"Failed to send data to server. Status code: {status_code}")
+    else:
+        print("SERVER_URL environment variable is not set. Skipping data send.")
+
+
 if __name__ == '__main__':
+    train_data_path = os.getenv("TRAIN_DATA_DIRECTORY")
+    if train_data_path is None:
+        raise ValueError("TRAIN_DATA_DIRECTORY environment variable is not set. Please set it to the path of your image folder.")
+    
+    subfolders = ['camera']
+    model_path = "autoencoder.h5"
+    server_url = os.getenv("SERVER_URL")
+    log_file = "image_log.txt"
+
+    # Start the model thread
+    model_thread = threading.Thread(target=model_thread_function, args=(train_data_path, subfolders, model_path, server_url, log_file))
+    model_thread.daemon = True
+    model_thread.start()
+
     capture_thread = threading.Thread(target=capture.capture_images)
     capture_thread.daemon = True
     capture_thread.start()
-
-    monitor_thread = threading.Thread(target=monitor_folder)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-
-    ex1_model1_thread = threading.Thread(target=run_model)
-    ex1_model1_thread.daemon = True
-    ex1_model1_thread.start()
-
-    feature_vectors_thread = threading.Thread(target=process_feature_vectors)
-    feature_vectors_thread.daemon = True
-    feature_vectors_thread.start()
 
     app.run(debug=True)
