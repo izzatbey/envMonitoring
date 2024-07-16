@@ -68,7 +68,7 @@ def train_and_save_model(train_data_path, subfolders, model_path='autoencoder.h5
 
     input_shape = (128, 128, 3)
     autoencoder, encoder = build_autoencoder(input_shape)
-    autoencoder.fit(X_train, X_train, epochs=3, batch_size=32, validation_data=(X_test, X_test))
+    autoencoder.fit(X_train, X_train, epochs=3, batch_size=16, validation_data=(X_test, X_test))
 
     autoencoder.save(model_path)
     encoder.save(model_path.replace('.h5', '_encoder.h5'))
