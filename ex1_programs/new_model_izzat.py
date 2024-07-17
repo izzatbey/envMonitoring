@@ -4,10 +4,13 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D
 from tensorflow.keras.models import Model, load_model
+import tensorflow as tf
 import pandas as pd
 import json
 import requests
 from dotenv import load_dotenv
+import time
+
 
 load_dotenv()
 
@@ -60,18 +63,35 @@ def build_autoencoder(input_shape):
     return autoencoder, encoder
 
 def train_and_save_model(train_data_path, subfolders, model_path='autoencoder.h5', log_file="image_log.txt"):
-    images, _ = load_images_from_subfolders(train_data_path, subfolders, log_file=log_file)
-    print(f"Total images loaded: {len(images)}")  # Debug statement
-    if len(images) == 0:
-        raise ValueError("No images were loaded. Please check the data directory and subfolders.")
-    X_train, X_test = train_test_split(images, test_size=0.2, random_state=42)
+    physical_devices = tf.config.experimental.list_physical_devices('GPU')
+    if physical_devices:
+        try:
+            for gpu in physical_devices:
+                # Check if virtual devices are configured
+                if not tf.config.experimental.get_virtual_device_configuration(gpu):
+                    tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(e)
+    
+    while True:
+        images, _ = load_images_from_subfolders(train_data_path, subfolders, log_file=log_file)
+        print(f"Total images loaded: {len(images)}")  # Debug statement
+        
+        if len(images) >= 50:
+            X_train, X_test = train_test_split(images, test_size=0.2, random_state=42)
 
-    input_shape = (128, 128, 3)
-    autoencoder, encoder = build_autoencoder(input_shape)
-    autoencoder.fit(X_train, X_train, epochs=3, batch_size=16, validation_data=(X_test, X_test))
+            input_shape = (128, 128, 3)
+            autoencoder, encoder = build_autoencoder(input_shape)
+            autoencoder.fit(X_train, X_train, epochs=3, batch_size=16, validation_data=(X_test, X_test))
 
-    autoencoder.save(model_path)
-    encoder.save(model_path.replace('.h5', '_encoder.h5'))
+            autoencoder.save(model_path)
+            encoder.save(model_path.replace('.h5', '_encoder.h5'))
+            
+            print("Model training completed and saved.")
+            break  # Exit the loop after successful training
+        else:
+            print("Not enough images to proceed with training. Sleeping for 30 seconds.")
+            time.sleep(30)
 
 def load_model_and_predict(model_path, images):
     encoder = load_model(model_path)
@@ -82,11 +102,23 @@ def load_model_and_predict(model_path, images):
     
     return flattened_features
 
-def send_file_to_server(file_path, server_url):
-    with open(file_path, 'rb') as file:
-        files = {'file': file}
-        response = requests.post(server_url, files=files)
-    return response.status_code
+def send_file_to_server(features_file, zip_file, server_url, max_retries=5, sleep_time=30):
+    for attempt in range(max_retries):
+        try:
+            with open(features_file, 'rb') as ff, open(zip_file, 'rb') as zf:
+                files = {'feature_vectors': ff, 'raw_images': zf}
+                response = requests.post(server_url, files=files)
+                response.raise_for_status()
+            print(f"Files sent successfully on attempt {attempt + 1}")
+            return response.status_code
+        except requests.exceptions.RequestException as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+            else:
+                print("Max retries reached. Files could not be sent.")
+    return None
 
 def delete_images(image_names):
     for img_path in image_names:

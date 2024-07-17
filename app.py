@@ -1,21 +1,26 @@
-from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from pathlib import Path
-from dotenv import load_dotenv
+import cv2
 import os
 import threading
 import time
 import sys
 import requests
-import sqlalchemy
 import pandas as pd
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from dotenv import load_dotenv
+from pathlib import Path
+import re
+import resource
+import sqlalchemy
+import zipfile
 
 sys.path.append('./img_capture')
 from img_capture import capture
 
 sys.path.append('./ex1_programs')
 from new_model_izzat import train_and_save_model, load_model_and_predict, send_file_to_server, delete_images, load_images_from_subfolders
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -35,7 +40,7 @@ class Image(db.Model):
     def __init__(self, filename, path, camId):
         self.filename = filename
         self.path = path
-        self.camId = camId
+        this.camId = camId
 
 with app.app_context():
     db.create_all()
@@ -46,19 +51,19 @@ def monitor_folder():
     img_folder = Path(env_img_folder)
     camId = os.getenv("CAM_ID")
 
-    # while True:
-    for file_path in img_folder.glob('*.jpg'):
-        if file_path.name not in processed_files:
-            new_image = Image(filename=file_path.name, path=str(file_path), camId=camId)
-            with app.app_context():
-                try:
-                    db.session.add(new_image)
-                    db.session.commit()
-                    processed_files.add(file_path.name)
-                    print(f"Inserted {file_path.name} into the database")
-                except sqlalchemy.exc.IntegrityError:
-                    db.session.rollback()
-                    print(f"Duplicate entry {file_path.name}, skipping.")
+    while True:
+        for file_path in img_folder.glob('*.jpg'):
+            if file_path.name not in processed_files:
+                new_image = Image(filename=file_path.name, path=str(file_path), camId=camId)
+                with app.app_context():
+                    try:
+                        db.session.add(new_image)
+                        db.session.commit()
+                        processed_files.add(file_path.name)
+                        print(f"Inserted {file_path.name} into the database")
+                    except sqlalchemy.exc.IntegrityError:
+                        db.session.rollback()
+                        print(f"Duplicate entry {file_path.name}, skipping.")
         
         time.sleep(10)  # Check every 10 seconds
 
@@ -67,71 +72,102 @@ def get_images():
     images = Image.query.all()
     return jsonify([{"id": img.id, "filename": img.filename, "path": img.path} for img in images]), 200
 
+def capture_images():
+    img_folder = os.getenv("IMG_FOLDER")
+    webcam = cv2.VideoCapture(0)
+    if not webcam.isOpened():
+        print("Error opening video capture device")
+        return
+
+    while True:
+        ret, frame = webcam.read()
+        if not ret:
+            print("Error: cannot read device")
+            return
+        if frame is None:
+            continue
+        
+        train_data_path = os.getenv("TRAIN_DATA_DIRECTORY")
+        filename = f"{train_data_path}/camera/image_{int(time.time())}.jpg"
+        cv2.imwrite(filename, frame)
+        print("Saved ", filename)
+
+        time.sleep(1)
+
 def process_feature_vectors():
     model_dir = Path(os.getenv("MODEL_OUTPUT_DIRECTORY"))
-    # while True:
-    feature_vectors_file = model_dir / 'feature_vectors.csv'
+    while True:
+        feature_vectors_file = model_dir / 'feature_vectors.csv'
 
-    if feature_vectors_file.exists():
-        # Read contents of the file
-        with open(feature_vectors_file, 'rb') as file:
-            file_data = file.read()
+        if feature_vectors_file.exists():
+            with open(feature_vectors_file, 'rb') as file:
+                file_data = file.read()
 
-        # Replace with your server endpoint
-        server_url = os.getenv("SERVER_UPLOAD_URL")
-            
-        try:
-            # Send file to server using POST request
-            response = requests.post(server_url, files={'file': file_data})
-            response.raise_for_status()  # Raise an exception for HTTP errors
+            server_url = os.getenv("SERVER_UPLOAD_URL")
                 
-            # If upload successful, delete the file
-            os.remove(feature_vectors_file)
-            print(f"Uploaded and deleted {feature_vectors_file}")
-            
-        except requests.exceptions.RequestException as e:
-            print(f"Error uploading file: {e}")
+            try:
+                response = requests.post(server_url, files={'file': file_data})
+                response.raise_for_status()
+                os.remove(feature_vectors_file)
+                print(f"Uploaded and deleted {feature_vectors_file}")
+                
+            except requests.exceptions.RequestException as e:
+                print(f"Error uploading file: {e}")
 
-    else:
-        print(f"{feature_vectors_file} does not exist.")
+        else:
+            print(f"{feature_vectors_file} does not exist.")
         
-    time.sleep(30)  # Sleep for 30 seconds before next iteration
+    time.sleep(30)
+
+def zip_images(image_names, zip_file_path):
+    with zipfile.ZipFile(zip_file_path, 'w') as zipf:
+        for img_name in image_names:
+            zipf.write(img_name, os.path.basename(img_name))
+    print(f"Images zipped successfully into {zip_file_path}")
 
 def model_thread_function(train_data_path, subfolders, model_path, server_url, log_file):
-    model_time_start = time.time()
-    # Train and save the model
-    train_and_save_model(train_data_path, subfolders, model_path, log_file)
+    while True:
+        model_time_start = time.time()
+        train_and_save_model(train_data_path, subfolders, model_path, log_file)
+        images, image_names = load_images_from_subfolders(train_data_path, subfolders, log_file=log_file)
+        features = load_model_and_predict(model_path.replace('.h5', '_encoder.h5'), images)
+        features_file = f"encoded_features{int(time.time())}.csv"
+        pd.DataFrame(features).to_csv(features_file, index=False)
 
-    # Load images for prediction (this can be modified as per your requirements)
-    images, image_names = load_images_from_subfolders(train_data_path, subfolders, log_file=log_file)
+        # Zip the raw images
+        zip_file_path = f"raw_images_{int(time.time())}.zip"
+        zip_images(image_names, zip_file_path)
 
-    # Load model and predict
-    features = load_model_and_predict(model_path.replace('.h5', '_encoder.h5'), images)
+        model_time_end = time.time()
+        execution_time = model_time_end - model_time_start
+        print("Execution Model Time : ", execution_time)
 
-    # Save features to CSV
-    features_file = "encoded_features.csv"
-    pd.DataFrame(features).to_csv(features_file, index=False)
-
-    model_time_end = time.time()
-    execution_time = model_time_end - model_time_start
-    print("Execution Model Time : ", execution_time)
-
-    # Send features file to server
-    if server_url:
-        status_code = send_file_to_server(features_file, server_url)
-        if status_code == 200:
-            print("Data sent successfully to the server.")
-            delete_images(image_names)
-            os.remove(features_file)
+        if server_url:
+            status_code = send_file_to_server(features_file, zip_file_path, server_url)
+            if status_code == 200:
+                print("Data sent successfully to the server.")
+                delete_images(image_names)
+                os.remove(features_file)
+                os.remove(zip_file_path)
+            else:
+                print("Failed to send data to server after retries.")
         else:
-            print(f"Failed to send data to server. Status code: {status_code}")
-    else:
-        print("SERVER_URL environment variable is not set. Skipping data send.")
-    
+            print("SERVER_URL environment variable is not set. Skipping data send.")
+        
+        time.sleep(30)
 
+def limit_resources():
+    rsrc = resource.RLIMIT_NPROC
+    soft, hard = resource.getrlimit(rsrc)
+    resource.setrlimit(rsrc, (1024, hard))
 
+    rsrc = resource.RLIMIT_AS
+    soft, hard = resource.getrlimit(rsrc)
+    resource.setrlimit(rsrc, (4 * 1024 * 1024 * 1024, hard))
 
 if __name__ == '__main__':
+    limit_resources()
+    
     train_data_path = os.getenv("TRAIN_DATA_DIRECTORY")
     if train_data_path is None:
         raise ValueError("TRAIN_DATA_DIRECTORY environment variable is not set. Please set it to the path of your image folder.")
@@ -141,14 +177,21 @@ if __name__ == '__main__':
     server_url = os.getenv("SERVER_URL")
     log_file = "image_log.txt"
 
-    model_thread_function(train_data_path, subfolders, model_path, server_url, log_file)
-    # Start the model thread
-    # model_thread = threading.Thread(target=model_thread_function, args=(train_data_path, subfolders, model_path, server_url, log_file))
-    # model_thread.daemon = True
-    # model_thread.start()
+    print("Starting capture_images thread")
+    capture_thread = threading.Thread(target=capture_images)
+    capture_thread.daemon = True
+    capture_thread.start()
+    print("Started capture_images thread")
+    
+    print("Starting model_thread_function thread")
+    model_thread = threading.Thread(target=model_thread_function, args=(train_data_path, subfolders, model_path, server_url, log_file))
+    model_thread.daemon = True
+    model_thread.start()
+    print("Started model_thread_function thread")
+    
+    print("Active threads:", threading.active_count())
 
-    # capture_thread = threading.Thread(target=capture.capture_images)
-    # capture_thread.daemon = True
-    # capture_thread.start()
+    capture_thread.join()
+    model_thread.join()
 
     app.run(debug=True)
